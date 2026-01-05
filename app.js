@@ -1,10 +1,9 @@
 // FXSport. Full JS.
 // Ready ring: Yellow. Exercise ring: Green. Rest ring: Red.
-// Progress bar gradient is handled in CSS (.progress__bar uses --accent-grad).
-// If image missing, show big exercise name.
-// If preset = Area 51, exclude group = full.
 // End sound: plays once at the end. Final rest block is not created.
-// Pause/Resume: Start resumes from paused second (does not restart the block).
+// Pause behavior: Pause + Start resumes from where you paused (no restart).
+// Tabata 6 exercises: 3 sets. Each set alternates a/b for 8 rounds (20 work, 10 rest). +15s between sets.
+// Tabata selection: picks 6 unique exercises balanced and ensures each pair uses different groups.
 
 const RAW_SETTINGS =
   "https://wmprietopardo.github.io/fxsport/Documents/FXSport-Settings.csv";
@@ -24,9 +23,15 @@ const SFX_WORKOUT_END =
   "https://wmprietopardo.github.io/fxsport/Sounds/end_exersice.wav";
 
 // Ring colors
-const RING_WORK = "#2cff8f";   // Exercise = Green
-const RING_REST = "#ff3b3b";   // Rest = Red
-const RING_READY = "#ffd54a";  // Ready = Yellow
+const RING_WORK = "#2cff8f";
+const RING_REST = "#ff3b3b";
+const RING_READY = "#ffd54a";
+
+// Tabata constants
+const TABATA_WORK = 20;
+const TABATA_REST = 10;
+const TABATA_ROUNDS_PER_SET = 8; // 4x A and 4x B
+const TABATA_BETWEEN_SETS_REST = 15;
 
 // State
 let settings = [];
@@ -35,14 +40,16 @@ let plan = [];
 let idx = 0;
 
 let running = false;
-let paused = false;
 let tickHandle = null;
 
+// Block timing
 let blockStartMs = 0;
 let blockTotalMs = 0;
 let blockEndMs = 0;
 
-// Pause tracking for current block
+// Pause state (so Start resumes)
+let paused = false;
+let pausedRemainingMs = 0;
 let pausedElapsedMs = 0;
 
 let preWorkCuePlayed = false;
@@ -51,6 +58,7 @@ const R = 52;
 const CIRC = 2 * Math.PI * R;
 
 let currentSetTimings = [];
+let setTimingsReadOnly = false;
 
 // ---------- DOM helper
 function $(id){ return document.getElementById(id); }
@@ -63,7 +71,7 @@ function keepTimerFocus(){
   catch(e) { try { t.focus(); } catch(e2) {} }
 }
 
-function setStartLabel(){
+function updateStartButtonLabel(){
   const b = $("start");
   if(!b) return;
   b.textContent = paused ? "Resume" : "Start";
@@ -226,6 +234,17 @@ async function fetchText(url, label){
   return text;
 }
 
+function getPresetKey(){
+  return $("presetSelect") ? $("presetSelect").value : "custom";
+}
+
+function resetPause(){
+  paused = false;
+  pausedRemainingMs = 0;
+  pausedElapsedMs = 0;
+  updateStartButtonLabel();
+}
+
 // ---------- Ring
 function initRing(){
   const prog = $("ringProg");
@@ -263,12 +282,17 @@ function updateWorkoutProgress(){
   const total = getTotalSessionSeconds();
   const doneFullBlocks = plan.slice(0, idx).reduce((sum, b) => sum + (b.seconds || 0), 0);
 
-  const currentElapsed = running
-    ? Math.min(blockTotalMs, Math.max(0, Date.now() - blockStartMs))
-    : (paused ? pausedElapsedMs : 0);
+  let currentElapsed = 0;
+  const now = Date.now();
+  if(running){
+    currentElapsed = Math.min(blockTotalMs, Math.max(0, now - blockStartMs));
+  } else if(paused){
+    currentElapsed = Math.min(blockTotalMs, Math.max(0, pausedElapsedMs));
+  } else {
+    currentElapsed = 0;
+  }
 
   const done = doneFullBlocks + Math.floor(currentElapsed / 1000);
-
   const pctFloat = total ? Math.min(1, Math.max(0, done / total)) : 0;
   const pct = Math.round(pctFloat * 100);
 
@@ -394,6 +418,59 @@ function calcSuggestedSlotSeconds(totalMin, N, sets){
   return Math.max(2, Math.round(total / slots));
 }
 
+// Tabata selection: 6 unique, then arrange into 3 pairs where each pair has different groups
+function arrangeIntoPairsDifferentGroups(list6){
+  const a = list6.slice();
+  const used = Array(a.length).fill(false);
+
+  function rec(pairs){
+    if(pairs.length === 3) return pairs;
+
+    let i = 0;
+    while(i < a.length && used[i]) i++;
+    if(i >= a.length) return null;
+
+    used[i] = true;
+    for(let j = 0; j < a.length; j++){
+      if(used[j]) continue;
+      if(a[i].group && a[j].group && a[i].group === a[j].group) continue;
+
+      used[j] = true;
+      const out = rec(pairs.concat([[a[i], a[j]]]));
+      if(out) return out;
+      used[j] = false;
+    }
+    used[i] = false;
+    return null;
+  }
+
+  return rec([]);
+}
+
+function pickTabataSixBalancedWithPairConstraint(enabled){
+  // Try a few times to get a good 6 that can be paired
+  for(let attempt = 0; attempt < 25; attempt++){
+    const six = pickBalancedUnique(6, enabled);
+    if(six.length < 6) continue;
+    const pairs = arrangeIntoPairsDifferentGroups(six);
+    if(pairs) return { six, pairs };
+  }
+
+  // Fallback: brute pick 6 from shuffled and attempt pairing
+  const shuffled = shuffle(enabled);
+  for(let start = 0; start < Math.min(80, shuffled.length - 5); start++){
+    const six = shuffled.slice(start, start + 6);
+    const uniq = new Map();
+    six.forEach(x => uniq.set(`${x.name}||${x.group}`, x));
+    const list6 = Array.from(uniq.values());
+    if(list6.length !== 6) continue;
+    const pairs = arrangeIntoPairsDifferentGroups(list6);
+    if(pairs) return { six: list6, pairs };
+  }
+
+  return null;
+}
+
 // ---------- Presets
 function setInputs({ totalMin, n, sets, restDefault, readySec, group }){
   if(totalMin !== undefined && $("totalMin")) $("totalMin").value = String(totalMin);
@@ -403,6 +480,31 @@ function setInputs({ totalMin, n, sets, restDefault, readySec, group }){
   if(readySec !== undefined && $("readySec")) $("readySec").value = String(readySec);
   if(group !== undefined && $("groupSelect")) $("groupSelect").value = String(group);
 }
+
+function setTabataUiState(isTabata){
+  setTimingsReadOnly = !!isTabata;
+
+  const helper = $("timingsHelper");
+  if(helper){
+    helper.textContent = isTabata
+      ? `Tabata fixed: 8 rounds per set. Work ${TABATA_WORK}s, Rest ${TABATA_REST}s. Between sets: ${TABATA_BETWEEN_SETS_REST}s.`
+      : "Slot is total time per exercise for that set. Work + Rest = Slot.";
+  }
+
+  const gs = $("groupSelect");
+  if(gs) gs.disabled = isTabata; // Tabata always balanced across all groups
+
+  const n = $("n");
+  const sets = $("sets");
+  const totalMin = $("totalMin");
+  const restDefault = $("restDefault");
+
+  if(n) n.disabled = isTabata;
+  if(sets) sets.disabled = isTabata;
+  if(totalMin) totalMin.disabled = isTabata;
+  if(restDefault) restDefault.disabled = isTabata;
+}
+
 function applyPreset(key){
   const readyEl = $("readySec");
   const READY_DEFAULT = readyEl ? (Number(readyEl.value) || 15) : 15;
@@ -427,13 +529,21 @@ function applyPreset(key){
     area51: {
       totalMin: 12, n: 6, sets: 1, readySec: READY_DEFAULT, restDefault: 30,
       setTimings: [{ slot:120, work:90, rest:30 }]
+    },
+    tabata6: {
+      totalMin: 8, n: 6, sets: 3, readySec: READY_DEFAULT, restDefault: TABATA_REST,
+      setTimings: [{ slot: TABATA_WORK + TABATA_REST, work: TABATA_WORK, rest: TABATA_REST },
+                   { slot: TABATA_WORK + TABATA_REST, work: TABATA_WORK, rest: TABATA_REST },
+                   { slot: TABATA_WORK + TABATA_REST, work: TABATA_WORK, rest: TABATA_REST }]
     }
   };
 
   const p = presets[key];
   if(!p) return;
 
-  setInputs(p);
+  setTabataUiState(key === "tabata6");
+  setInputs({ ...p, group: "any" });
+
   currentSetTimings = p.setTimings.map(t => ({ slot: t.slot, work: t.work, rest: t.rest }));
   renderSetTimingInputs();
   updateMetaPreview();
@@ -462,6 +572,7 @@ function ensureSetTimings(sets, suggestedSlot, restDefault){
   }
   currentSetTimings = next;
 }
+
 function renderSetTimingInputs(){
   const wrap = $("setTimings");
   if(!wrap) return;
@@ -474,28 +585,33 @@ function renderSetTimingInputs(){
     row.style.gap = "8px";
     row.style.alignItems = "center";
 
+    const dis = setTimingsReadOnly ? "disabled" : "";
+
     row.innerHTML = `
       <div style="font-weight:800;">Set ${s + 1}</div>
       <label style="display:grid; gap:4px;">
         <span style="font-size:12px; color:#aaa;">Slot</span>
-        <input type="number" min="2" max="2400" value="${t.slot}" data-set="${s}" data-kind="slot" class="control" />
+        <input type="number" min="2" max="2400" value="${t.slot}" data-set="${s}" data-kind="slot" class="control" ${dis} />
       </label>
       <label style="display:grid; gap:4px;">
         <span style="font-size:12px; color:#aaa;">Work</span>
-        <input type="number" min="1" max="2400" value="${t.work}" data-set="${s}" data-kind="work" class="control" />
+        <input type="number" min="1" max="2400" value="${t.work}" data-set="${s}" data-kind="work" class="control" ${dis} />
       </label>
       <label style="display:grid; gap:4px;">
         <span style="font-size:12px; color:#aaa;">Rest</span>
-        <input type="number" min="0" max="2400" value="${t.rest}" data-set="${s}" data-kind="rest" class="control" />
+        <input type="number" min="0" max="2400" value="${t.rest}" data-set="${s}" data-kind="rest" class="control" ${dis} />
       </label>
     `;
     wrap.appendChild(row);
   });
 
+  if(setTimingsReadOnly) return;
+
   wrap.querySelectorAll("input").forEach(inp => {
     inp.addEventListener("input", () => {
       const preset = $("presetSelect");
       if(preset) preset.value = "custom";
+      setTabataUiState(false);
 
       const s = Number(inp.dataset.set);
       const kind = inp.dataset.kind;
@@ -528,6 +644,7 @@ function renderSetTimingInputs(){
     });
   });
 }
+
 function readSetTimings(){
   return currentSetTimings.map(t => ({
     slot: Math.max(2, Number(t.slot) || 2),
@@ -536,8 +653,8 @@ function readSetTimings(){
   }));
 }
 
-// ---------- Plan
-function buildPlan({ N, sets, readySec, circuit, setTimings }){
+// ---------- Plan builders
+function buildPlanStandard({ N, sets, readySec, circuit, setTimings }){
   const blocks = [];
 
   if(readySec > 0){
@@ -567,6 +684,75 @@ function buildPlan({ N, sets, readySec, circuit, setTimings }){
   return blocks;
 }
 
+function buildPlanTabata({ readySec, pairs, sets }){
+  const blocks = [];
+
+  if(readySec > 0){
+    blocks.push({
+      type: "ready",
+      seconds: readySec,
+      ex: { name: "Get ready", group: "", how_to: "Get into position.", image: "" },
+      setIndex: -1,
+      exIndex: -1,
+      n: 2,
+      sets,
+      mode: "tabata"
+    });
+  }
+
+  for(let s = 0; s < sets; s++){
+    const [A, B] = pairs[s];
+
+    for(let r = 0; r < TABATA_ROUNDS_PER_SET; r++){
+      const ex = (r % 2 === 0) ? A : B;
+      blocks.push({
+        type: "work",
+        seconds: TABATA_WORK,
+        ex,
+        setIndex: s,
+        exIndex: (r % 2),
+        n: 2,
+        sets,
+        mode: "tabata",
+        round: r + 1,
+        roundTotal: TABATA_ROUNDS_PER_SET
+      });
+
+      const isLastRoundInSet = (r === TABATA_ROUNDS_PER_SET - 1);
+      const isLastSet = (s === sets - 1);
+
+      if(!isLastRoundInSet){
+        blocks.push({
+          type: "rest",
+          seconds: TABATA_REST,
+          ex,
+          setIndex: s,
+          exIndex: (r % 2),
+          n: 2,
+          sets,
+          mode: "tabata",
+          round: r + 1,
+          roundTotal: TABATA_ROUNDS_PER_SET
+        });
+      } else if(!isLastSet){
+        blocks.push({
+          type: "rest",
+          seconds: TABATA_BETWEEN_SETS_REST,
+          ex,
+          setIndex: s,
+          exIndex: -1,
+          n: 2,
+          sets,
+          mode: "tabata",
+          betweenSet: true
+        });
+      }
+    }
+  }
+
+  return blocks;
+}
+
 // ---------- Workout list (WORK ONLY)
 function renderWorkoutList(){
   const ol = $("workoutList");
@@ -580,12 +766,17 @@ function renderWorkoutList(){
     li.dataset.workIndex = String(i);
     li.dataset.planIndex = String(plan.indexOf(b));
 
-    const setLabel = `Set ${b.setIndex + 1}/${b.sets}`;
-    const exLabel = `Ex ${b.exIndex + 1}/${b.n}`;
     const name = b.ex?.name || "";
     const group = b.ex?.group ? `(${b.ex.group})` : "";
 
-    li.textContent = `${setLabel}. ${exLabel}. ${name} ${group}`;
+    let left = "";
+    if(b.mode === "tabata" && b.round){
+      left = `Set ${b.setIndex + 1}/${b.sets}. Round ${b.round}/${b.roundTotal}.`;
+    } else {
+      left = `Set ${b.setIndex + 1}/${b.sets}. Ex ${b.exIndex + 1}/${b.n}.`;
+    }
+
+    li.textContent = `${left} ${name} ${group}`.trim();
     ol.appendChild(li);
   });
 
@@ -628,12 +819,18 @@ function renderBlock(block){
   const isRest = block.type === "rest";
 
   if(phaseEl){
-    phaseEl.textContent = isReady ? "Ready" : (isRest ? "Rest" : "Exercise");
+    if(isReady) phaseEl.textContent = "Ready";
+    else if(isRest) phaseEl.textContent = "Rest";
+    else phaseEl.textContent = "Exercise";
     phaseEl.style.fontWeight = "1000";
   }
 
   if(setLineEl){
-    if(block.setIndex >= 0){
+    if(block.betweenSet){
+      setLineEl.textContent = `Between sets. Next: Set ${block.setIndex + 2}/${block.sets}`;
+    } else if(block.mode === "tabata" && block.round){
+      setLineEl.textContent = `Set ${block.setIndex + 1}/${block.sets}. Round ${block.round}/${block.roundTotal}`;
+    } else if(block.setIndex >= 0){
       setLineEl.textContent = `Set ${block.setIndex + 1}/${block.sets}. Exercise ${block.exIndex + 1}/${block.n}`;
     } else {
       setLineEl.textContent = " ";
@@ -689,47 +886,36 @@ function renderBlock(block){
   updateWorkoutProgress();
 }
 
-// ---------- Timer control
-function stopIntervalOnly(){
+// ---------- Timer controls
+function stopTick({ resetPauseState = true } = {}){
   running = false;
   if(tickHandle) clearInterval(tickHandle);
   tickHandle = null;
-}
-
-function stopTickHard(){
-  stopIntervalOnly();
-  paused = false;
-  pausedElapsedMs = 0;
-  setStartLabel();
+  if(resetPauseState) resetPause();
   updateWorkoutProgress();
 }
 
 function pauseTick(){
-  if(!running || !plan.length) return;
-
+  if(!running) return;
   const now = Date.now();
-  pausedElapsedMs = Math.min(blockTotalMs, Math.max(0, now - blockStartMs));
+  pausedRemainingMs = Math.max(0, blockEndMs - now);
+  pausedElapsedMs = Math.max(0, blockTotalMs - pausedRemainingMs);
   paused = true;
 
-  stopIntervalOnly();
-  setStartLabel();
+  running = false;
+  if(tickHandle) clearInterval(tickHandle);
+  tickHandle = null;
 
-  const b = plan[idx];
-  const remainingMs = Math.max(0, blockTotalMs - pausedElapsedMs);
-  if($("timer")) $("timer").textContent = fmtTime(Math.ceil(remainingMs / 1000));
-  setRing(ringTypeForBlockType(b.type), blockTotalMs ? (pausedElapsedMs / blockTotalMs) : 1);
-
+  updateStartButtonLabel();
   updateWorkoutProgress();
   keepTimerFocus();
 }
 
 function startBlock(i){
+  resetPause();
+
   idx = Math.max(0, Math.min(i, plan.length - 1));
   const b = plan[idx];
-
-  paused = false;
-  pausedElapsedMs = 0;
-  setStartLabel();
 
   blockStartMs = Date.now();
   blockTotalMs = b.seconds * 1000;
@@ -747,7 +933,25 @@ function startBlock(i){
   keepTimerFocus();
 }
 
-function tickStep(){
+function resumeTick(){
+  if(!plan.length || running || !paused) return;
+
+  const now = Date.now();
+  blockEndMs = now + pausedRemainingMs;
+  blockStartMs = now - Math.max(0, blockTotalMs - pausedRemainingMs);
+
+  paused = false;
+  pausedRemainingMs = 0;
+  pausedElapsedMs = 0;
+
+  running = true;
+  updateStartButtonLabel();
+
+  tickHandle = setInterval(onTick, 100);
+  keepTimerFocus();
+}
+
+function onTick(){
   const now = Date.now();
   const b = plan[idx];
 
@@ -773,7 +977,7 @@ function tickStep(){
     idx += 1;
 
     if(idx >= plan.length){
-      stopTickHard();
+      stopTick({ resetPauseState: true });
       if($("phase")) $("phase").textContent = "Done";
       if($("setLine")) $("setLine").textContent = "";
       if($("next")) $("next").textContent = "";
@@ -796,49 +1000,48 @@ function tickStep(){
   }
 }
 
-function startTickFresh(){
-  if(!plan.length || running) return;
+function startTick(){
+  if(!plan.length) return;
+  if(running) return;
+
+  if(paused){
+    resumeTick();
+    return;
+  }
 
   running = true;
-  paused = false;
-  pausedElapsedMs = 0;
-  setStartLabel();
-
   startBlock(idx);
 
   const firstType = plan[idx].type;
   if(firstType === "work") sWorkStart();
   else sRestStart();
 
-  tickHandle = setInterval(tickStep, 100);
-}
-
-function resumeTick(){
-  if(!plan.length || running || !paused) return;
-
-  running = true;
-  const now = Date.now();
-
-  blockStartMs = now - pausedElapsedMs;
-  blockEndMs = blockStartMs + blockTotalMs;
-
-  paused = false;
-  setStartLabel();
-
-  tickHandle = setInterval(tickStep, 100);
-
-  updateWorkoutProgress();
-  keepTimerFocus();
+  tickHandle = setInterval(onTick, 100);
 }
 
 // ---------- Meta preview
 function updateMetaPreview(){
-  const totalMin = $("totalMin") ? Number($("totalMin").value) : 12;
-  const N = $("n") ? Number($("n").value) : 4;
+  const presetKey = getPresetKey();
   const readySec = $("readySec") ? Number($("readySec").value) : 15;
 
-  const timings = readSetTimings();
+  if(presetKey === "tabata6"){
+    const plannedWorkSeconds = 3 * TABATA_ROUNDS_PER_SET * TABATA_WORK; // 3 sets, 8 rounds, 20s work each
+    const betweenIntervalRests = 3 * (TABATA_ROUNDS_PER_SET - 1) * TABATA_REST; // 7 rests per set
+    const betweenSetRests = 2 * TABATA_BETWEEN_SETS_REST;
 
+    const session = plannedWorkSeconds + betweenIntervalRests + betweenSetRests + Math.max(0, readySec);
+
+    if($("meta")){
+      $("meta").textContent =
+        `Target work: ${fmtTime(plannedWorkSeconds)}. Planned work: ${fmtTime(plannedWorkSeconds)}. Total session: ${fmtTime(session)}.`;
+    }
+    return;
+  }
+
+  const totalMin = $("totalMin") ? Number($("totalMin").value) : 12;
+  const N = $("n") ? Number($("n").value) : 4;
+
+  const timings = readSetTimings();
   const plannedWorkSeconds = timings.reduce((sum, t) => sum + (t.work * N), 0);
   const plannedTargetSeconds = Math.round(totalMin * 60);
   const plannedSessionSeconds =
@@ -872,7 +1075,7 @@ async function loadAll(){
 
 // ---------- Build workout
 function buildWorkout(){
-  stopTickHard();
+  stopTick({ resetPauseState: true });
 
   const enabledAll = getEnabledExercises();
   if(!enabledAll.length){
@@ -880,9 +1083,44 @@ function buildWorkout(){
     return;
   }
 
-  const presetKey = $("presetSelect") ? $("presetSelect").value : "custom";
-  const area51NoFull = presetKey === "area51";
+  const presetKey = getPresetKey();
 
+  if(presetKey === "tabata6"){
+    // Force fixed inputs and timings
+    setTabataUiState(true);
+    setInputs({ totalMin: 8, n: 6, sets: 3, restDefault: TABATA_REST, group: "any" });
+
+    currentSetTimings = [
+      { slot: TABATA_WORK + TABATA_REST, work: TABATA_WORK, rest: TABATA_REST },
+      { slot: TABATA_WORK + TABATA_REST, work: TABATA_WORK, rest: TABATA_REST },
+      { slot: TABATA_WORK + TABATA_REST, work: TABATA_WORK, rest: TABATA_REST },
+    ];
+    renderSetTimingInputs();
+
+    const readySec = $("readySec") ? Number($("readySec").value) : 15;
+
+    const pick = pickTabataSixBalancedWithPairConstraint(enabledAll);
+    if(!pick){
+      if($("meta")) $("meta").textContent = "Tabata needs at least 2 groups available to pair exercises (A/B, C/D, E/F).";
+      return;
+    }
+
+    const pairs = pick.pairs; // [ [a,b], [c,d], [e,f] ]
+    plan = buildPlanTabata({ readySec, pairs, sets: 3 });
+    idx = 0;
+
+    updateMetaPreview();
+    startBlock(0);
+    renderWorkoutList();
+    updateWorkoutProgress();
+    keepTimerFocus();
+    return;
+  }
+
+  // Standard programs
+  setTabataUiState(false);
+
+  const area51NoFull = presetKey === "area51";
   const enabled = area51NoFull
     ? enabledAll.filter(x => x.group !== "full")
     : enabledAll;
@@ -923,7 +1161,7 @@ function buildWorkout(){
     return;
   }
 
-  plan = buildPlan({ N, sets, readySec, circuit, setTimings });
+  plan = buildPlanStandard({ N, sets, readySec, circuit, setTimings });
   idx = 0;
 
   updateMetaPreview();
@@ -931,7 +1169,6 @@ function buildWorkout(){
   renderWorkoutList();
   updateWorkoutProgress();
   keepTimerFocus();
-  setStartLabel();
 }
 
 // ---------- Init + wiring
@@ -944,7 +1181,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if($("timer")) $("timer").textContent = "00:00";
   setAudioStatus("");
   updateWorkoutProgress();
-  setStartLabel();
+  updateStartButtonLabel();
 
   if($("unlockAudio")){
     $("unlockAudio").onclick = async () => {
@@ -974,6 +1211,13 @@ document.addEventListener("DOMContentLoaded", () => {
       try{
         await loadAll();
 
+        const presetKey = getPresetKey();
+        if(presetKey === "tabata6"){
+          applyPreset("tabata6");
+          keepTimerFocus();
+          return;
+        }
+
         const totalMin = $("totalMin") ? Number($("totalMin").value) : 12;
         const N = $("n") ? Number($("n").value) : 4;
         const sets = $("sets") ? Number($("sets").value) : 3;
@@ -993,7 +1237,10 @@ document.addEventListener("DOMContentLoaded", () => {
   if($("presetSelect")){
     $("presetSelect").addEventListener("change", (e) => {
       const key = e.target.value;
-      if(key === "custom") return;
+      if(key === "custom"){
+        setTabataUiState(false);
+        return;
+      }
       applyPreset(key);
       keepTimerFocus();
     });
@@ -1007,9 +1254,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if(timerEl) timerEl.scrollIntoView({ block: "center", behavior: "smooth" });
 
       try { await ensureAudioReady(); } catch(e) {}
-
-      if(paused) resumeTick();
-      else startTickFresh();
+      startTick();
     };
   }
 
@@ -1018,7 +1263,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if($("prev")){
     $("prev").onclick = () => {
       if(!plan.length) return;
-      stopTickHard();
+      stopTick({ resetPauseState: true });
       startBlock(idx - 1);
     };
   }
@@ -1026,7 +1271,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if($("skip")){
     $("skip").onclick = () => {
       if(!plan.length) return;
-      stopTickHard();
+      stopTick({ resetPauseState: true });
       startBlock(idx + 1);
     };
   }
@@ -1034,7 +1279,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if($("restart")){
     $("restart").onclick = () => {
       if(!plan.length) return;
-      stopTickHard();
+      stopTick({ resetPauseState: true });
       idx = 0;
       startBlock(0);
     };
@@ -1044,7 +1289,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const el = $(id);
     if(!el) return;
     el.addEventListener("change", () => {
+      if(getPresetKey() === "tabata6"){
+        updateMetaPreview();
+        return;
+      }
+
       if($("presetSelect")) $("presetSelect").value = "custom";
+      setTabataUiState(false);
 
       const totalMin = $("totalMin") ? Number($("totalMin").value) : 12;
       const N = $("n") ? Number($("n").value) : 4;
