@@ -4,6 +4,7 @@
 // If image missing, show big exercise name.
 // If preset = Area 51, exclude group = full.
 // End sound: plays once at the end. Final rest block is not created.
+// Pause/Resume: Start resumes from paused second (does not restart the block).
 
 const RAW_SETTINGS =
   "https://wmprietopardo.github.io/fxsport/Documents/FXSport-Settings.csv";
@@ -34,11 +35,15 @@ let plan = [];
 let idx = 0;
 
 let running = false;
+let paused = false;
 let tickHandle = null;
 
 let blockStartMs = 0;
 let blockTotalMs = 0;
 let blockEndMs = 0;
+
+// Pause tracking for current block
+let pausedElapsedMs = 0;
 
 let preWorkCuePlayed = false;
 
@@ -56,6 +61,12 @@ function keepTimerFocus(){
   if(!t) return;
   try { t.focus({ preventScroll: true }); }
   catch(e) { try { t.focus(); } catch(e2) {} }
+}
+
+function setStartLabel(){
+  const b = $("start");
+  if(!b) return;
+  b.textContent = paused ? "Resume" : "Start";
 }
 
 // ---------- WebAudio
@@ -252,8 +263,10 @@ function updateWorkoutProgress(){
   const total = getTotalSessionSeconds();
   const doneFullBlocks = plan.slice(0, idx).reduce((sum, b) => sum + (b.seconds || 0), 0);
 
-  const now = Date.now();
-  const currentElapsed = running ? Math.min(blockTotalMs, Math.max(0, now - blockStartMs)) : 0;
+  const currentElapsed = running
+    ? Math.min(blockTotalMs, Math.max(0, Date.now() - blockStartMs))
+    : (paused ? pausedElapsedMs : 0);
+
   const done = doneFullBlocks + Math.floor(currentElapsed / 1000);
 
   const pctFloat = total ? Math.min(1, Math.max(0, done / total)) : 0;
@@ -676,17 +689,47 @@ function renderBlock(block){
   updateWorkoutProgress();
 }
 
-// ---------- Timer
-function stopTick(){
+// ---------- Timer control
+function stopIntervalOnly(){
   running = false;
   if(tickHandle) clearInterval(tickHandle);
   tickHandle = null;
+}
+
+function stopTickHard(){
+  stopIntervalOnly();
+  paused = false;
+  pausedElapsedMs = 0;
+  setStartLabel();
   updateWorkoutProgress();
+}
+
+function pauseTick(){
+  if(!running || !plan.length) return;
+
+  const now = Date.now();
+  pausedElapsedMs = Math.min(blockTotalMs, Math.max(0, now - blockStartMs));
+  paused = true;
+
+  stopIntervalOnly();
+  setStartLabel();
+
+  const b = plan[idx];
+  const remainingMs = Math.max(0, blockTotalMs - pausedElapsedMs);
+  if($("timer")) $("timer").textContent = fmtTime(Math.ceil(remainingMs / 1000));
+  setRing(ringTypeForBlockType(b.type), blockTotalMs ? (pausedElapsedMs / blockTotalMs) : 1);
+
+  updateWorkoutProgress();
+  keepTimerFocus();
 }
 
 function startBlock(i){
   idx = Math.max(0, Math.min(i, plan.length - 1));
   const b = plan[idx];
+
+  paused = false;
+  pausedElapsedMs = 0;
+  setStartLabel();
 
   blockStartMs = Date.now();
   blockTotalMs = b.seconds * 1000;
@@ -704,64 +747,88 @@ function startBlock(i){
   keepTimerFocus();
 }
 
-function startTick(){
+function tickStep(){
+  const now = Date.now();
+  const b = plan[idx];
+
+  const remainingMs = Math.max(0, blockEndMs - now);
+  const elapsedMs = Math.min(blockTotalMs, Math.max(0, now - blockStartMs));
+  const frac = blockTotalMs ? (elapsedMs / blockTotalMs) : 1;
+
+  if($("timer")) $("timer").textContent = fmtTime(Math.ceil(remainingMs / 1000));
+  setRing(ringTypeForBlockType(b.type), frac);
+
+  updateWorkoutProgress();
+
+  const nextBlock = plan[idx + 1];
+  const nextIsWork = nextBlock && nextBlock.type === "work";
+  const curIsWork = b.type === "work";
+
+  if(!curIsWork && nextIsWork && !preWorkCuePlayed && remainingMs <= 5000 && remainingMs > 0){
+    preWorkCuePlayed = true;
+    sWorkStart();
+  }
+
+  if(remainingMs <= 0){
+    idx += 1;
+
+    if(idx >= plan.length){
+      stopTickHard();
+      if($("phase")) $("phase").textContent = "Done";
+      if($("setLine")) $("setLine").textContent = "";
+      if($("next")) $("next").textContent = "";
+      setRing("rest", 1);
+      sWorkoutEnd();
+      highlightWorkoutList();
+      updateWorkoutProgress();
+      keepTimerFocus();
+      return;
+    }
+
+    const nextType = plan[idx].type;
+    if(nextType !== "work"){
+      sRestStart();
+    } else {
+      if(!preWorkCuePlayed) sWorkStart();
+    }
+
+    startBlock(idx);
+  }
+}
+
+function startTickFresh(){
   if(!plan.length || running) return;
 
   running = true;
+  paused = false;
+  pausedElapsedMs = 0;
+  setStartLabel();
+
   startBlock(idx);
 
   const firstType = plan[idx].type;
   if(firstType === "work") sWorkStart();
   else sRestStart();
 
-  tickHandle = setInterval(() => {
-    const now = Date.now();
-    const b = plan[idx];
+  tickHandle = setInterval(tickStep, 100);
+}
 
-    const remainingMs = Math.max(0, blockEndMs - now);
-    const elapsedMs = Math.min(blockTotalMs, Math.max(0, now - blockStartMs));
-    const frac = blockTotalMs ? (elapsedMs / blockTotalMs) : 1;
+function resumeTick(){
+  if(!plan.length || running || !paused) return;
 
-    if($("timer")) $("timer").textContent = fmtTime(Math.ceil(remainingMs / 1000));
-    setRing(ringTypeForBlockType(b.type), frac);
+  running = true;
+  const now = Date.now();
 
-    updateWorkoutProgress();
+  blockStartMs = now - pausedElapsedMs;
+  blockEndMs = blockStartMs + blockTotalMs;
 
-    const nextBlock = plan[idx + 1];
-    const nextIsWork = nextBlock && nextBlock.type === "work";
-    const curIsWork = b.type === "work";
+  paused = false;
+  setStartLabel();
 
-    if(!curIsWork && nextIsWork && !preWorkCuePlayed && remainingMs <= 5000 && remainingMs > 0){
-      preWorkCuePlayed = true;
-      sWorkStart();
-    }
+  tickHandle = setInterval(tickStep, 100);
 
-    if(remainingMs <= 0){
-      idx += 1;
-
-      if(idx >= plan.length){
-        stopTick();
-        if($("phase")) $("phase").textContent = "Done";
-        if($("setLine")) $("setLine").textContent = "";
-        if($("next")) $("next").textContent = "";
-        setRing("rest", 1);
-        sWorkoutEnd();
-        highlightWorkoutList();
-        updateWorkoutProgress();
-        keepTimerFocus();
-        return;
-      }
-
-      const nextType = plan[idx].type;
-      if(nextType !== "work"){
-        sRestStart();
-      } else {
-        if(!preWorkCuePlayed) sWorkStart();
-      }
-
-      startBlock(idx);
-    }
-  }, 100);
+  updateWorkoutProgress();
+  keepTimerFocus();
 }
 
 // ---------- Meta preview
@@ -805,7 +872,7 @@ async function loadAll(){
 
 // ---------- Build workout
 function buildWorkout(){
-  stopTick();
+  stopTickHard();
 
   const enabledAll = getEnabledExercises();
   if(!enabledAll.length){
@@ -864,6 +931,7 @@ function buildWorkout(){
   renderWorkoutList();
   updateWorkoutProgress();
   keepTimerFocus();
+  setStartLabel();
 }
 
 // ---------- Init + wiring
@@ -876,6 +944,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if($("timer")) $("timer").textContent = "00:00";
   setAudioStatus("");
   updateWorkoutProgress();
+  setStartLabel();
 
   if($("unlockAudio")){
     $("unlockAudio").onclick = async () => {
@@ -938,15 +1007,18 @@ document.addEventListener("DOMContentLoaded", () => {
       if(timerEl) timerEl.scrollIntoView({ block: "center", behavior: "smooth" });
 
       try { await ensureAudioReady(); } catch(e) {}
-      startTick();
+
+      if(paused) resumeTick();
+      else startTickFresh();
     };
   }
-  if($("pause")) $("pause").onclick = stopTick;
+
+  if($("pause")) $("pause").onclick = pauseTick;
 
   if($("prev")){
     $("prev").onclick = () => {
       if(!plan.length) return;
-      stopTick();
+      stopTickHard();
       startBlock(idx - 1);
     };
   }
@@ -954,7 +1026,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if($("skip")){
     $("skip").onclick = () => {
       if(!plan.length) return;
-      stopTick();
+      stopTickHard();
       startBlock(idx + 1);
     };
   }
@@ -962,7 +1034,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if($("restart")){
     $("restart").onclick = () => {
       if(!plan.length) return;
-      stopTick();
+      stopTickHard();
       idx = 0;
       startBlock(0);
     };
