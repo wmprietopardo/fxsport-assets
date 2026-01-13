@@ -1149,7 +1149,19 @@ document.addEventListener("DOMContentLoaded", () => {
   warmup.load();
   }
   
-  
+  const stretch = document.getElementById("vidStretch");
+ if (stretch) {
+  stretch.src = VIDEO_STRETCH_1_URL;
+  stretch.load();
+
+  stretch.addEventListener("ended", () => {
+    stretch.src = VIDEO_STRETCH_2_URL;
+    stretch.load();
+
+    const p = stretch.play();
+    if (p && typeof p.catch === "function") p.catch(() => {});
+  });
+  }
 
   initRing();
   setRing("rest", 0);
