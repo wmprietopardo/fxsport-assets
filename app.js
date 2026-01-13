@@ -475,6 +475,21 @@ function applyPreset(key){
       totalMin: 12, n: 4, sets: 3, readySec: READY_DEFAULT, restDefault: 30,
       setTimings: [{ slot:60, work:30, rest:30 }, { slot:60, work:35, rest:25 }, { slot:60, work:45, rest:15 }]
     },
+    "40x20x4": {
+      totalMin: 12, n: 4, sets: 3, readySec: READY_DEFAULT, restDefault: 20,
+      setTimings: [
+       { slot:60, work:40, rest:20 },
+       { slot:60, work:40, rest:20 },
+       { slot:60, work:40, rest:20 }
+      ] 
+    },
+    "40x20x6": {
+      totalMin: 12, n: 6, sets: 2, readySec: READY_DEFAULT, restDefault: 20,
+      setTimings: [
+         { slot:60, work:40, rest:20 },
+         { slot:60, work:40, rest:20 }
+      ]
+    },
     "30x30x4": {
       totalMin: 12, n: 4, sets: 3, readySec: READY_DEFAULT, restDefault: 30,
       setTimings: [{ slot:60, work:30, rest:30 }, { slot:60, work:30, rest:30 }, { slot:60, work:30, rest:30 }]
