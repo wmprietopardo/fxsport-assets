@@ -28,9 +28,9 @@ const SFX_WORKOUT_END =
 
 // Videos
 const VIDEO_WARMUP_URL =
-  "https://wmprietopardo.github.io/fxsport-assets/Videos/calentamiento.mp4";
+  "https://wmprietopardo.github.io/fxsport/Videos/calentamiento.mp4";
 const VIDEO_STRETCH_URL =
-  "https://wmprietopardo.github.io/fxsport-assets/Videos/estiramiento.mp4";
+  "https://wmprietopardo.github.io/fxsport/Videos/estiramiento.mp4";
 
 // Ring colors
 const RING_WORK = "#2cff8f";   // Exercise = Green
