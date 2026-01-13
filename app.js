@@ -35,7 +35,6 @@ const VIDEO_STRETCH_1_URL =
 const VIDEO_STRETCH_2_URL =
   "https://wmprietopardo.github.io/fxsport/Videos/estiramiento2.mp4";
 
-
 // Ring colors
 const RING_WORK = "#2cff8f";   // Exercise = Green
 const RING_REST = "#ff3b3b";   // Rest = Red
@@ -1137,30 +1136,53 @@ function buildWorkout(){
   keepTimerFocus();
 }
 
+// ---------- Video wiring (lazy load on play, so it does not interfere with audio)
+let warmupVideoSrcSet = false;
+let stretchVideoInitialized = false;
+
+function setupWarmupVideo(){
+  const v = document.getElementById("vidWarmup");
+  if(!v || warmupVideoSrcSet) return;
+  warmupVideoSrcSet = true;
+
+  v.preload = "none";
+  v.playsInline = true;
+  v.src = VIDEO_WARMUP_URL;
+}
+
+function setupStretchVideo(){
+  const v = document.getElementById("vidStretch");
+  if(!v || stretchVideoInitialized) return;
+  stretchVideoInitialized = true;
+
+  v.preload = "none";
+  v.playsInline = true;
+  v.src = VIDEO_STRETCH_1_URL;
+
+  v.addEventListener("ended", () => {
+    v.src = VIDEO_STRETCH_2_URL;
+
+    const p = v.play();
+    if(p && typeof p.catch === "function") p.catch(() => {});
+  });
+}
+
 // ---------- Init + wiring
 document.addEventListener("DOMContentLoaded", () => {
   if($("spotifyEmbed")) $("spotifyEmbed").src = SPOTIFY_EMBED_URL;
   if($("openSpotify")) $("openSpotify").href = SPOTIFY_PLAYLIST_URL;
 
-  // Videos
+  // Videos: only set src when user hits Play
   const warmup = document.getElementById("vidWarmup");
-  if (warmup) {
-  warmup.src = VIDEO_WARMUP_URL;
-  warmup.load();
+  if(warmup){
+    warmup.preload = "none";
+    warmup.addEventListener("play", setupWarmupVideo, { once: true });
   }
-  
+
   const stretch = document.getElementById("vidStretch");
- if (stretch) {
-  stretch.src = VIDEO_STRETCH_1_URL;
-  stretch.load();
-
-  stretch.addEventListener("ended", () => {
-    stretch.src = VIDEO_STRETCH_2_URL;
-    stretch.load();
-
-    const p = stretch.play();
-    if (p && typeof p.catch === "function") p.catch(() => {});
-  });
+  if(stretch){
+    stretch.preload = "none";
+    stretch.addEventListener("play", setupStretchVideo, { once: true });
   }
 
   initRing();
