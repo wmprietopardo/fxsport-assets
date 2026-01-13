@@ -35,26 +35,6 @@ const VIDEO_STRETCH_1_URL =
 const VIDEO_STRETCH_2_URL =
   "https://wmprietopardo.github.io/fxsport/Videos/estiramiento2.MOV";
 
-document.addEventListener("DOMContentLoaded", () => {
-  // ... keep your other init code
-
-  const stretch = $("vidStretch");
-  if (stretch) {
-    stretch.src = VIDEO_STRETCH_1_URL;
-
-    // iPhone requires user gesture to start playback.
-    // This only auto-plays part 2 AFTER part 1 was started by the user.
-    stretch.addEventListener("ended", () => {
-      // Swap to part 2 and play
-      stretch.src = VIDEO_STRETCH_2_URL;
-      stretch.load();
-
-      const p = stretch.play();
-      if (p && typeof p.catch === "function") p.catch(() => {});
-    });
-  }
-});
-
 
 // Ring colors
 const RING_WORK = "#2cff8f";   // Exercise = Green
@@ -1163,9 +1143,6 @@ document.addEventListener("DOMContentLoaded", () => {
   if($("openSpotify")) $("openSpotify").href = SPOTIFY_PLAYLIST_URL;
 
   // Videos
-  //const warmup = $("vidWarmup");
-  //if(warmup) warmup.src = VIDEO_WARMUP_URL;
-
   const warmup = document.getElementById("vidWarmup");
   if (warmup) {
   warmup.src = VIDEO_WARMUP_URL;
@@ -1173,7 +1150,20 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   
   const stretch = $("vidStretch");
-  if(stretch) stretch.src = VIDEO_STRETCH_URL;
+  if (stretch) {
+    stretch.src = VIDEO_STRETCH_1_URL;
+
+    // iPhone requires user gesture to start playback.
+    // This only auto-plays part 2 AFTER part 1 was started by the user.
+    stretch.addEventListener("ended", () => {
+      // Swap to part 2 and play
+      stretch.src = VIDEO_STRETCH_2_URL;
+      stretch.load();
+
+      const p = stretch.play();
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    });
+  }
 
   initRing();
   setRing("rest", 0);
