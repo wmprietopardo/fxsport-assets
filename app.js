@@ -31,9 +31,9 @@ const VIDEO_WARMUP_URL =
   "https://wmprietopardo.github.io/fxsport/Videos/calentamiento.mp4";
 // Split stretch video parts
 const VIDEO_STRETCH_1_URL =
-  "https://wmprietopardo.github.io/fxsport/Videos/estiramiento1.MOV";
+  "https://wmprietopardo.github.io/fxsport/Videos/estiramiento1.mp4";
 const VIDEO_STRETCH_2_URL =
-  "https://wmprietopardo.github.io/fxsport/Videos/estiramiento2.MOV";
+  "https://wmprietopardo.github.io/fxsport/Videos/estiramiento2.mp4";
 
 
 // Ring colors
