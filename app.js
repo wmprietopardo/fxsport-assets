@@ -1139,9 +1139,16 @@ document.addEventListener("DOMContentLoaded", () => {
   if($("openSpotify")) $("openSpotify").href = SPOTIFY_PLAYLIST_URL;
 
   // Videos
-  const warmup = $("vidWarmup");
+  //const warmup = $("vidWarmup");
+  //if(warmup) warmup.src = VIDEO_WARMUP_URL;
+
+  const warmup = document.getElementById("vidWarmup");
+  if (warmup) {
+  warmup.src = VIDEO_WARMUP_URL;
+  warmup.load();
+  }
+  
   const stretch = $("vidStretch");
-  if(warmup) warmup.src = VIDEO_WARMUP_URL;
   if(stretch) stretch.src = VIDEO_STRETCH_URL;
 
   initRing();
