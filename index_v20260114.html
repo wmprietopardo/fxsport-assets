@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#05070d" />
+
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="FXSport" />
+  <link rel="apple-touch-icon" href="Icons/icon-180.png" />
+
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="app_v20260114.css" />
+  <script defer src="app_v20260114.js"></script>
+
+  <title>FXSport</title>
+</head>
+
+<body>
+  <div class="app">
+    <header class="app__header">
+      <div class="brand">
+        <div class="brand__logo">FX</div>
+        <div class="brand__text">
+          <h1 class="brand__title">FXSport</h1>
+          <div class="brand__subtitle">Train. Breathe. Repeat.</div>
+        </div>
+      </div>
+    </header>
+
+    <main class="app__grid">
+      <!-- Setup -->
+      <section class="card card--setup" id="setup">
+        <div class="card__header">
+          <div class="card__title">Setup</div>
+          <div class="card__sub">Load, pick a program, build.</div>
+        </div>
+
+        <div class="row">
+          <button id="load" class="btn btn--primary">1. Load Exercises</button>
+        </div>
+
+        <div class="form-grid">
+          <label class="field">
+            <span class="field__label">2. Programs</span>
+            <select id="presetSelect" class="control">
+              <option value="custom">Custom</option>
+              <option value="keops">Keops. 4 ex. 3 sets (30/30, 35/25, 45/15)</option>
+              <option value="40x20x4">40x20x4. 4 ex. 3 sets (40/20)</option>
+              <option value="40x20x6">40x20x6. 6 ex. 2 sets (40/20)</option>
+              <option value="30x30x4">30x30x4. 4 ex. 3 sets (30/30)</option>
+              <option value="30x30x6">30x30x6. 6 ex. 2 sets (30/30)</option>
+              <option value="cambalache">Cambalache. 12 ex. 1 set (60/30)</option>
+              <option value="area51">Area 51. 6 ex. 1 set (90/30)</option>
+              <option value="tabata6">Tabata. 6 exercises (3 sets. 20/10. +15s between sets)</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span class="field__label">3. Group</span>
+            <select id="groupSelect" class="control">
+              <option value="any">Any (balanced)</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="form-grid">
+          <label class="field">
+            <span class="field__label">Total minutes (work)</span>
+            <input id="totalMin" type="number" min="1" max="120" value="12" class="control" />
+          </label>
+
+          <label class="field">
+            <span class="field__label">Exercises (N)</span>
+            <input id="n" type="number" min="1" max="60" value="4" class="control" />
+          </label>
+
+          <label class="field">
+            <span class="field__label">Sets</span>
+            <input id="sets" type="number" min="1" max="10" value="3" class="control" />
+          </label>
+
+          <label class="field">
+            <span class="field__label">Rest default (sec)</span>
+            <input id="restDefault" type="number" min="0" max="600" value="25" class="control" />
+          </label>
+
+          <label class="field">
+            <span class="field__label">Ready (sec)</span>
+            <input id="readySec" type="number" min="0" max="120" value="15" class="control" />
+          </label>
+
+          <div class="field field--button">
+            <span class="field__label"> </span>
+            <button id="build" class="btn btn--primary">4. Build workout</button>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="section-title">Per set timings</div>
+        <div id="setTimings" class="set-timings"></div>
+        <div id="timingsHelper" class="helper">Slot is total time per exercise for that set. Work + Rest = Slot.</div>
+
+        <div class="divider"></div>
+
+        <div class="audio-row">
+          <label class="check">
+            <input id="soundOn" type="checkbox" checked />
+            <span>Sounds</span>
+          </label>
+
+          <label class="field field--inline">
+            <span class="field__label">Volume</span>
+            <input id="volume" type="range" min="0" max="1" step="0.05" value="1" class="range" />
+          </label>
+
+          <button id="unlockAudio" type="button" class="btn btn--ghost">Enable sound</button>
+          <span id="audioStatus" class="status"></span>
+
+          <button id="testStart" type="button" class="btn btn--ghost">Test Exercise</button>
+          <button id="testRest" type="button" class="btn btn--ghost">Test Rest</button>
+        </div>
+
+        <div id="meta" class="meta"></div>
+
+        <div class="row row--tight">
+          <a class="btn btn--ghost btn--link" href="#list">Workout list</a>
+          <a class="btn btn--ghost btn--link" href="#music">Spotify</a>
+          <a class="btn btn--ghost btn--link" href="#videos">Videos</a>
+        </div>
+      </section>
+
+      <!-- Workout -->
+      <section class="card card--workout" id="workout">
+        <div class="card__header">
+          <div class="card__title">Workout</div>
+          <div class="card__sub">Timer and next exercise.</div>
+        </div>
+
+        <div class="row row--tight">
+          <button id="start" class="btn btn--primary btn--wide">Start</button>
+          <button id="pause" class="btn">Pause</button>
+          <button id="prev" class="btn">Prev</button>
+          <button id="skip" class="btn">Next</button>
+          <button id="restart" class="btn btn--ghost">Restart</button>
+        </div>
+
+        <div class="timer-layout">
+          <div class="ring">
+            <svg viewBox="0 0 120 120" class="ring__svg" aria-hidden="true">
+              <circle cx="60" cy="60" r="52" class="ring__track"></circle>
+              <circle id="ringProg" cx="60" cy="60" r="52" class="ring__prog"
+                stroke-linecap="round" transform="rotate(-90 60 60)"></circle>
+            </svg>
+            <div id="timer" tabindex="0" class="ring__time">00:00</div>
+          </div>
+
+          <div class="workout-info">
+            <div class="progress-top">
+              <span id="workoutPct" class="pill">0%</span>
+              <span id="workoutRemain" class="muted">Remaining: 00:00</span>
+            </div>
+
+            <div class="progress">
+              <div id="workoutBar" class="progress__bar"></div>
+            </div>
+
+            <div id="phase" class="phase">Idle</div>
+            <div id="setLine" class="muted"></div>
+
+            <div id="exName" class="exName"></div>
+          </div>
+        </div>
+
+        <div class="exMedia">
+          <img id="exImg" class="exImg" style="display:none;" />
+          <div id="exFallback" class="exFallback" style="display:none;"></div>
+        </div>
+
+        <p id="exHow" class="exHow"></p>
+        <p id="next" class="nextLine"></p>
+      </section>
+
+      <!-- Workout list -->
+      <section class="card card--list" id="list">
+        <div class="card__header">
+          <div class="card__title">Workout list</div>
+          <div class="card__sub">Work blocks only.</div>
+        </div>
+        <ol id="workoutList" class="list"></ol>
+      </section>
+
+      <!-- Music -->
+      <section class="card card--music" id="music">
+        <div class="card__header">
+          <div class="card__title">Music</div>
+          <div class="card__sub">Full playback happens in Spotify.</div>
+        </div>
+
+        <div class="row">
+          <a id="openSpotify"
+            href="https://open.spotify.com/playlist/3X393B14lthT2jdYmC4TZA"
+            target="_blank" rel="noopener"
+            class="btn btn--spotify btn--wide">
+            Open full playlist in Spotify
+          </a>
+        </div>
+
+        <iframe
+          id="spotifyEmbed"
+          class="spotify"
+          width="100%"
+          height="152"
+          frameborder="0"
+          allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          loading="lazy"
+        ></iframe>
+      </section>
+
+      <!-- Videos -->
+      <section class="card card--videos" id="videos">
+        <div class="card__header">
+          <div class="card__title">Videos</div>
+          <div class="card__sub">Warm up and stretching.</div>
+        </div>
+
+        <div class="video-grid">
+          <figure class="video-card">
+            <figcaption class="video-title">Calentamiento</figcaption>
+            <video id="vidWarmup" class="video" controls playsinline preload="none"></video>
+          </figure>
+
+          <figure class="video-card">
+            <figcaption class="video-title">Estiramiento</figcaption>
+            <video id="vidStretch" class="video" controls playsinline preload="none"></video>
+          </figure>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
